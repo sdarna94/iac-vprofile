@@ -1,0 +1,68 @@
+name: "Vprofile IAC"
+on: 
+  push:
+    branches:
+      - main
+      - stage
+    paths:
+      - terraform/**
+  pull_request:
+    branches:
+      - main
+    paths:
+      - terraform/**
+
+env:
+  #credentials for deployment to AWS
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+  #S3 bucket for terraform state
+  BUCKET_TF_STATE: ${{ secrets.BUCKET_TF_STATE }}
+  AWS_REGION: us-east-2
+  EKS_CLUSTER_NAME: vprofile-eks
+
+  jobs:
+    terraform:
+      name: "Terraform Plan & Apply"
+      runs-on: ubuntu-latest
+      defaults:
+        run:
+          shell: bash
+          working-directory: ./terraform
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+
+        - name: Setup Terraform
+          uses: hashicorp/setup-terraform@v2
+          #with:
+            #terraform_version: 1.7.5
+
+        - name: Terraform Init
+          id: init
+          run: |
+            terraform init \
+              -backend-config="bucket=${BUCKET_TF_STATE}" \
+              -backend-config="region=${AWS_REGION}" \
+              -backend-config="key=terraform.tfstate"
+
+        - name: Terraform Format Check
+          id : fmt
+          run: terraform fmt -check
+
+        - name: Terraform Validate
+          id: validate
+          run: terraform validate
+
+        - name: Terraform Plan
+          id: plan
+          run: |
+            terraform plan -out=tfplan.binary
+            terraform show -json tfplan.binary > tfplan.json
+          continue-on-error: true
+
+        - name:  Terraform Plan status
+          if: steps.plan.outcome == 'failure'
+          run: exit 1
+        
